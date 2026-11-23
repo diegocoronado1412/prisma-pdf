@@ -10,10 +10,10 @@ from pathlib import Path
 import pymupdf
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (QAction, QBrush, QColor, QFont, QIcon, QImage, QKeySequence, QPainter, QPainterPath,
-                           QPen, QPixmap)
+                           QPalette, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
                                QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
-                               QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QHeaderView, QInputDialog,
+                               QGraphicsProxyWidget, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
                                QSpinBox, QSplitter, QStackedWidget, QStatusBar, QTableWidget, QTableWidgetItem,
@@ -57,7 +57,9 @@ QFrame#tile {{ background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12
 QFrame#tile:hover {{ border: 1px solid {ACCENT}; background: #F6FBFB; }}
 QFrame#recent {{ background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; }}
 QStatusBar {{ background: #FFFFFF; border-top: 1px solid #DDE2E7; color: #55626C; }}
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ border: 1px solid #CBD3D9; border-radius: 6px; padding: 5px 7px; background: white; }}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ border: 1px solid #CBD3D9; border-radius: 6px; padding: 5px 7px; background: white; color: #1F2A33; }}
+QDialog, QMessageBox, QInputDialog {{ background: #FFFFFF; color: #1F2A33; }}
+QComboBox QAbstractItemView {{ background: white; color: #1F2A33; selection-background-color: {ACCENT}; selection-color: white; }}
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{ border-color: {ACCENT}; }}
 """
 
@@ -182,6 +184,99 @@ class PageItem(QGraphicsRectItem):
         p.drawRect(self.rect())
 
 
+class InlineEditor(QFrame):
+    """Caja de texto que aparece encima del renglón, con una barrita de formato arriba."""
+    FONTS = {"Arial / Helvetica": ("helv", "hebo", "Arial"), "Times": ("tiro", "tibo", "Times New Roman"),
+             "Courier": ("cour", "cobo", "Courier New")}
+
+    def __init__(self, viewer, text, size, color, bold, bg, family, on_commit, on_cancel):
+        super().__init__(objectName="inline")
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.viewer, self.on_commit, self.on_cancel = viewer, on_commit, on_cancel
+        self.color = color
+        self.setStyleSheet("QFrame#inline{background:transparent} QFrame#bar{background:#13202A;border-radius:7px} QFrame#bar QToolButton{color:white;border:0;padding:3px 7px;border-radius:4px;font-weight:700}"
+                           "QFrame#bar QToolButton:hover{background:#2C3B47} QFrame#bar QToolButton:checked{background:%s}"
+                           "QFrame#bar QDoubleSpinBox, QFrame#bar QComboBox{background:#2C3B47;color:white;border:0;border-radius:4px;padding:2px 4px}" % ACCENT)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        bar = QFrame(objectName="bar")
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(6, 4, 6, 4)
+        bl.setSpacing(4)
+        self.font_box = QComboBox()
+        self.font_box.addItems(list(self.FONTS))
+        self.font_box.setCurrentText(family)
+        self.size_box = QDoubleSpinBox()
+        self.size_box.setRange(4, 200)
+        self.size_box.setDecimals(1)
+        self.size_box.setSingleStep(0.5)
+        self.size_box.setValue(size)
+        self.size_box.setSuffix(" pt")
+        self.bold_btn = QToolButton(text="B", checkable=True, checked=bold)
+        self.color_btn = QToolButton(text="A")
+        self.color_btn.setToolTip("Color de la letra")
+        ok = QToolButton(text="✓  Aplicar")
+        ok.setToolTip("Aplicar (Enter)")
+        no = QToolButton(text="✕")
+        no.setToolTip("Cancelar (Esc)")
+        for w in (self.font_box, self.size_box, self.bold_btn, self.color_btn, ok, no):
+            bl.addWidget(w)
+        lay.addWidget(bar, 0, Qt.AlignLeft)
+        self.edit = QLineEdit(text)
+        self.bg = QColor.fromRgbF(*[float(c) for c in bg])
+        lay.addWidget(self.edit, 0, Qt.AlignLeft)
+        self.bar = bar
+        ok.clicked.connect(self.commit)
+        no.clicked.connect(self.cancel)
+        self.color_btn.clicked.connect(self.pick_color)
+        for sig in (self.size_box.valueChanged, self.bold_btn.toggled, self.font_box.currentTextChanged, self.edit.textChanged):
+            sig.connect(self.restyle)
+        self.edit.returnPressed.connect(self.commit)
+        self.restyle()
+
+    def pick_color(self):
+        c = QColorDialog.getColor(QColor.fromRgbF(*self.color), None)
+        if c.isValid():
+            self.color = (c.redF(), c.greenF(), c.blueF())
+            self.restyle()
+
+    def restyle(self, *_):
+        z = self.viewer.zoom
+        f = QFont(self.FONTS[self.font_box.currentText()][2])
+        f.setPixelSize(max(6, round(self.size_box.value() * z)))
+        f.setBold(self.bold_btn.isChecked())
+        self.edit.setFont(f)
+        c = QColor.fromRgbF(*self.color)
+        self.color_btn.setStyleSheet(f"color:white;border-bottom:3px solid {c.name() if c.lightness() > 40 else '#9AA5AE'}")
+        self.edit.setStyleSheet(f"QLineEdit{{background:{self.bg.name()};color:{c.name()};border:1.5px solid {ACCENT};border-radius:2px;padding:0 1px;"
+                                f"selection-background-color:{ACCENT};selection-color:white}}")
+        fm = self.edit.fontMetrics()
+        w = max(self.min_w if hasattr(self, "min_w") else 0, fm.horizontalAdvance(self.edit.text() + "  ") + 8)
+        self.edit.setFixedWidth(int(w))
+        self.edit.setFixedHeight(int(fm.height() + 4))
+        self.adjustSize()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.cancel()
+        else:
+            super().keyPressEvent(e)
+
+    def values(self):
+        codes = self.FONTS[self.font_box.currentText()]
+        return self.edit.text(), self.size_box.value(), self.color, codes[1] if self.bold_btn.isChecked() else codes[0]
+
+    def commit(self):
+        vals = self.values()
+        self.viewer.close_inline()
+        self.on_commit(*vals)
+
+    def cancel(self):
+        self.viewer.close_inline()
+        self.on_cancel and self.on_cancel()
+
+
 class Viewer(QGraphicsView):
     pageChanged = Signal(int)
     clicked = Signal(int, object)          # página, punto (coordenadas visuales PDF)
@@ -209,6 +304,7 @@ class Viewer(QGraphicsView):
     # ---- carga
     def load(self, doc: pymupdf.Document, keep_pos: bool = True):
         pos = self.verticalScrollBar().value() if keep_pos else 0
+        self.inline = None
         self.scene().clear()
         self.items = []
         self._band = self._hover = None
@@ -287,6 +383,34 @@ class Viewer(QGraphicsView):
         top = it.scenePos().y() + rect.y0 * self.zoom
         self.verticalScrollBar().setValue(int(top - self.viewport().height() / 3))
 
+    # ---- edición en el lugar
+    def start_inline(self, pno, vis_rect, **kw):
+        self.close_inline()
+        ed = InlineEditor(self, **kw)
+        it = self.items[pno]
+        ed.min_w = vis_rect.width * self.zoom + 12
+        ed.restyle()
+        proxy = QGraphicsProxyWidget()
+        proxy.setAutoFillBackground(False)
+        proxy.setWidget(ed)
+        proxy.setZValue(50)
+        self.scene().addItem(proxy)
+        bar_h = ed.bar.sizeHint().height() + 4
+        x = it.scenePos().x() + vis_rect.x0 * self.zoom - 3
+        y = it.scenePos().y() + vis_rect.y0 * self.zoom - bar_h - (ed.edit.height() - vis_rect.height * self.zoom) / 2 - 2
+        proxy.setPos(x, y)
+        self.inline = proxy
+        self.show_hover(pno, None)
+        ed.edit.setFocus()
+        ed.edit.selectAll()
+
+    def close_inline(self):
+        px = getattr(self, "inline", None)
+        self.inline = None
+        if px is not None:
+            px.widget().on_commit = px.widget().on_commit  # mantener referencias hasta salir
+            QTimer.singleShot(0, lambda: self.scene().removeItem(px) if px.scene() else None)
+
     # ---- interacción
     def set_mode(self, mode: str):
         self.mode = mode
@@ -304,6 +428,12 @@ class Viewer(QGraphicsView):
         return None, None
 
     def mousePressEvent(self, e):
+        px = getattr(self, "inline", None)
+        if px is not None:
+            if px.sceneBoundingRect().contains(self.mapToScene(e.position().toPoint())):
+                return super().mousePressEvent(e)
+            px.widget().commit()  # clic afuera = aplicar, como en Word
+            return
         if self.mode == "mano" or e.button() != Qt.LeftButton:
             return super().mousePressEvent(e)
         it, pt = self._locate(self.mapToScene(e.position().toPoint()))
@@ -318,6 +448,8 @@ class Viewer(QGraphicsView):
 
     def mouseMoveEvent(self, e):
         sp = self.mapToScene(e.position().toPoint())
+        if getattr(self, "inline", None) is not None:
+            return super().mouseMoveEvent(e)
         if self._band and self._press:
             self._band.setRect(QRectF(self._press[2], sp).normalized())
         elif self.mode == "editar":
@@ -340,6 +472,8 @@ class Viewer(QGraphicsView):
         self.scene().addItem(self._hover)
 
     def mouseReleaseEvent(self, e):
+        if getattr(self, "inline", None) is not None and not self._press:
+            return super().mouseReleaseEvent(e)
         if self.mode == "mano" or not self._press:
             return super().mouseReleaseEvent(e)
         it, pt0, sp0 = self._press
@@ -656,6 +790,7 @@ class MainWindow(QMainWindow):
         act("＋", lambda: self.zoom_by(1.2), "Ctrl+=")
         act("↔ Ajustar", lambda: self.doc and (self.view.fit_width(self.doc), self._zoom_label()))
         tb.addSeparator()
+        self.mode_buttons = {}
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         for key, label in (("mano", "✋ Mover"), ("editar", "✎ Editar texto"), ("texto", "T Agregar texto")):
@@ -664,6 +799,7 @@ class MainWindow(QMainWindow):
             b.setCheckable(True)
             b.clicked.connect(lambda _=False, k=key: self.set_mode(k))
             self.mode_group.addButton(b)
+            self.mode_buttons[key] = b
             tb.addWidget(b)
             if key == "mano":
                 b.setChecked(True)
@@ -1333,7 +1469,7 @@ class MainWindow(QMainWindow):
 
     HINTS = {
         "mano": "Arrastra para moverte. Ctrl + rueda del mouse para acercar o alejar.",
-        "editar": "Pasa el mouse sobre un renglón y haz clic para cambiar el texto.",
+        "editar": "Haz clic en un renglón y escribe encima. Enter o clic afuera para aplicar, Esc para cancelar.",
         "texto": "Haz clic donde quieras escribir.",
         "firma": "Dibuja un recuadro donde va la firma.",
         "imagen": "Dibuja un recuadro donde va la imagen.",
@@ -1353,9 +1489,8 @@ class MainWindow(QMainWindow):
             self.btn_hand.setChecked(True)
             return
         self.view.set_mode(mode)
-        for b in self.mode_group.buttons():
-            if b.isCheckable():
-                pass
+        if mode in self.mode_buttons:
+            self.mode_buttons[mode].setChecked(True)
         self._hint(mode)
 
     def back_to_hand(self):
@@ -1395,18 +1530,20 @@ class MainWindow(QMainWindow):
             info = core.span_at(page, p)
             if not info:
                 return
-            d = FormDialog(self, "Editar texto", [
-                ("t", "Texto", line(info["text"].strip())),
-                ("s", "Tamaño", spin(info["size"], 4, 200, 0.5, 1)),
-                ("c", "Color", ColorButton(info["color"])),
-                ("f", "Letra", combo(["Igual a la original (aprox.)", "Helvetica / Arial", "Times", "Courier"])),
-            ], ok="Cambiar", note=f"Letra original: {info['font']}")
-            if d.exec():
+            st = core.sample_style(page, info["rect"])
+            fn = core._base14_for(info["font"], info["flags"])
+            family = {"t": "Times", "c": "Courier"}.get(fn[0], "Arial / Helvetica")
+            vis = (info["rect"] * page.rotation_matrix).normalize()
+
+            def commit(text, size, color, code, info=info, pno=pno):
+                if text == info["text"].strip() and abs(size - info["size"]) < 0.05 and code == fn:
+                    return
                 self.snapshot()
-                fn = {"Helvetica / Arial": "helv", "Times": "tiro", "Courier": "cour"}.get(d.val("f"))
-                core.replace_line(page, info, d.val("t"), d.val("s"), d.val("c"), fn)
-                self.view.show_hover(pno, None)
+                core.replace_line(self.doc[pno], info, text, size, color, code)
                 self.changed([pno])
+            self.view.start_inline(pno, vis, text=info["text"].strip(), size=info["size"], color=info["color"],
+                                   bold=fn in ("hebo", "tibo", "cobo", "hebi", "tibi", "cobi"), bg=st["bg"], family=family,
+                                   on_commit=commit, on_cancel=None)
         elif mode == "texto":
             d = FormDialog(self, "Agregar texto", [
                 ("t", "Texto", QPlainTextEdit()),
@@ -1442,20 +1579,18 @@ class MainWindow(QMainWindow):
             return
         st = core.sample_style(page, info["rect"])
         info["style"] = st
-        font_label = "Helvetica / Arial negrilla" if st["bold"] else "Helvetica / Arial"
-        fn = self.SCAN_FONTS[font_label]
-        d = FormDialog(self, "Editar texto (escaneo)", [
-            ("t", "Texto", line(info["text"])),
-            ("s", "Tamaño", spin(core.estimate_size(info, st, fn), 4, 200, 0.5, 1)),
-            ("c", "Color", ColorButton(tuple(float(c) for c in st["color"]))),
-            ("f", "Letra", combo(list(self.SCAN_FONTS), font_label)),
-        ], ok="Cambiar", note="Revisa que el texto reconocido esté bien escrito. Prisma borra el renglón de la imagen "
-                              "con el color del fondo y escribe el nuevo con tamaño y color parecidos.")
-        if d.exec():
+        code = "hebo" if st["bold"] else "helv"
+        size = core.estimate_size(info, st, code)
+        vis = (info["rect"] * page.rotation_matrix).normalize()
+
+        def commit(text, size2, color, code2, info=info, pno=pno):
+            if text == info["text"] and abs(size2 - size) < 0.05 and code2 == code:
+                return
             self.snapshot()
-            core.replace_scanned(page, info, d.val("t"), d.val("s"), d.val("c"), self.SCAN_FONTS[d.val("f")])
-            self.view.show_hover(pno, None)
+            core.replace_scanned(self.doc[pno], info, text, size2, color, code2)
             self.changed([pno])
+        self.view.start_inline(pno, vis, text=info["text"], size=size, color=tuple(float(c) for c in st["color"]),
+                               bold=st["bold"], bg=st["bg"], family="Arial / Helvetica", on_commit=commit, on_cancel=None)
 
     def _quick_ocr(self):
         src = self._temp_copy()
@@ -2087,12 +2222,29 @@ def open_external(path):
         os.system(f'xdg-open "{path}"')
 
 
+def light_palette() -> QPalette:
+    """Siempre claro, aunque Windows o Mac estén en modo oscuro (si no, quedan letras blancas sobre blanco)."""
+    p = QPalette()
+    ink, soft = QColor("#1F2A33"), QColor("#8A96A0")
+    for role, c in ((QPalette.Window, "#F3F5F7"), (QPalette.Base, "#FFFFFF"), (QPalette.AlternateBase, "#F3F5F7"),
+                    (QPalette.Button, "#FFFFFF"), (QPalette.ToolTipBase, "#FFFFFF"), (QPalette.Highlight, ACCENT)):
+        p.setColor(role, QColor(c))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText, QPalette.ToolTipText):
+        p.setColor(role, ink)
+    p.setColor(QPalette.HighlightedText, QColor("white"))
+    p.setColor(QPalette.PlaceholderText, soft)
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, soft)
+    return p
+
+
 def main():
     if hasattr(Qt, "AA_EnableHighDpiScaling"):
         pass
     app = QApplication(sys.argv)
     app.setApplicationName(APP)
     app.setStyle("Fusion")
+    app.setPalette(light_palette())
     app.setStyleSheet(STYLE)
     icon = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets" / "icono.png"
     if icon.exists():
