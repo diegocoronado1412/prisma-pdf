@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer,
 from PySide6.QtGui import (QAction, QBrush, QColor, QFont, QIcon, QImage, QKeySequence, QPainter, QPainterPath,
                            QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
-                               QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
+                               QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea, QSizePolicy, QSlider,
@@ -50,6 +50,12 @@ QPushButton.ghost {{ background: #FFFFFF; color: #1F2A33; border: 1px solid #D5D
 QLabel.section {{ color: #7A8791; font-size: 11px; font-weight: 700; letter-spacing: 1px; padding-top: 8px; }}
 QLabel.hint {{ color: #6B7780; font-size: 12px; }}
 QGraphicsView {{ background: #CED5DB; border: 0; }}
+QWidget#home {{ background: #F3F5F7; }}
+QFrame#homehead {{ background: #FFFFFF; border-bottom: 1px solid #DDE2E7; }}
+QFrame#docbar {{ background: #E3F1F0; border-bottom: 1px solid #C9E2E0; }}
+QFrame#tile {{ background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; }}
+QFrame#tile:hover {{ border: 1px solid {ACCENT}; background: #F6FBFB; }}
+QFrame#recent {{ background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; }}
 QStatusBar {{ background: #FFFFFF; border-top: 1px solid #DDE2E7; color: #55626C; }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ border: 1px solid #CBD3D9; border-radius: 6px; padding: 5px 7px; background: white; }}
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{ border-color: {ACCENT}; }}
@@ -598,12 +604,13 @@ class MainWindow(QMainWindow):
             tb.addAction(a)
             return a
 
+        act("🏠 Inicio", lambda: self.show_welcome(True), "Ctrl+H")
         act("📂 Abrir", self.open_dialog, "Ctrl+O")
         self.a_save = act("💾 Guardar", self.save, "Ctrl+S")
         act("Guardar como…", self.save_as, "Ctrl+Shift+S")
         tb.addSeparator()
-        self.a_undo = act("↶ Deshacer", self.do_undo, "Ctrl+Z")
-        self.a_redo = act("↷ Rehacer", self.do_redo, "Ctrl+Y")
+        self.a_undo = act("↶", self.do_undo, "Ctrl+Z", "Deshacer (Ctrl+Z)")
+        self.a_redo = act("↷", self.do_redo, "Ctrl+Y", "Rehacer (Ctrl+Y)")
         tb.addSeparator()
         act("－", lambda: self.zoom_by(1 / 1.2), "Ctrl+-")
         self.zoom_lbl = QLabel("100%")
@@ -699,54 +706,210 @@ class MainWindow(QMainWindow):
         self.hint_lbl = QLabel()
         self.status.addWidget(self.hint_lbl)
 
+    # ------------------------------------------------ página de inicio
+    def _catalog(self):
+        """(categoría, ícono, color, título, descripción, acción, necesita documento)"""
+        m = self._mode_tool
+        return [
+            ("Editar", "✎", "#0E7C7B", "Editar texto", "Cambia el texto del PDF haciendo clic en el renglón", lambda: m("editar"), True),
+            ("Editar", "T", "#0E7C7B", "Agregar texto", "Escribe en cualquier parte de la página", lambda: m("texto"), True),
+            ("Editar", "⇄", "#0E7C7B", "Buscar y reemplazar", "Cambia una palabra o frase en todo el documento", self.find_replace, True),
+            ("Editar", "✍", "#0E7C7B", "Firmar", "Dibuja tu firma, úsala desde una foto o guárdala", self.sign, True),
+            ("Editar", "🖼", "#0E7C7B", "Insertar imagen", "Logos, sellos o fotos dentro del PDF", self.insert_image, True),
+            ("Editar", "☑", "#0E7C7B", "Llenar formulario", "Completa los campos de un formulario PDF", self.form_dialog, True),
+            ("Editar", "▮", "#0E7C7B", "Resaltar y comentar", "Resalta, subraya, tacha o deja notas", lambda: m("resaltar"), True),
+            ("Editar", "⬜", "#0E7C7B", "Borrar con blanco", "Tapa una parte de la página", lambda: m("borrar"), True),
+
+            ("Convertir desde PDF", "W", "#2B5797", "PDF a Word", "Documento editable con párrafos y tablas", lambda: self.export("docx"), True),
+            ("Convertir desde PDF", "X", "#1E7145", "PDF a Excel", "Las tablas pasan a hojas de cálculo", lambda: self.export("xlsx"), True),
+            ("Convertir desde PDF", "P", "#C43E1C", "PDF a PowerPoint", "Cada página como diapositiva", lambda: self.export("pptx"), True),
+            ("Convertir desde PDF", "🖼", "#7A4FBF", "PDF a imágenes", "JPG o PNG en la calidad que quieras", lambda: self.export("img"), True),
+            ("Convertir desde PDF", "≡", "#55626C", "PDF a texto", "Solo el texto, en un archivo .txt", lambda: self.export("txt"), True),
+            ("Convertir desde PDF", "</>", "#55626C", "PDF a HTML", "Para publicarlo como página web", lambda: self.export("html"), True),
+
+            ("Crear PDF", "⇪", "#D1495B", "Office a PDF", "Word, Excel, PowerPoint y más a PDF", self.files_to_pdf, False),
+            ("Crear PDF", "🖼", "#D1495B", "Imágenes a PDF", "Fotos o escaneos en un solo PDF", self.images_to_pdf_dialog, False),
+            ("Crear PDF", "⧉", "#D1495B", "Unir archivos", "Varios PDF, imágenes o documentos en uno", self.merge_files, False),
+
+            ("Organizar páginas", "⟳", "#E07A1F", "Girar páginas", "Endereza páginas de lado o al revés", self.rotate_dialog, True),
+            ("Organizar páginas", "🗑", "#E07A1F", "Eliminar páginas", "Quita las páginas que sobran", self.delete_dialog, True),
+            ("Organizar páginas", "⤴", "#E07A1F", "Extraer páginas", "Saca unas páginas a un PDF nuevo", self.extract_dialog, True),
+            ("Organizar páginas", "✂", "#E07A1F", "Dividir PDF", "Por página, por rangos o por tamaño", self.split_dialog, True),
+            ("Organizar páginas", "＋", "#E07A1F", "Insertar páginas", "Agrega otro archivo dentro del PDF", self.insert_file, True),
+            ("Organizar páginas", "⬚", "#E07A1F", "Recortar márgenes", "Deja solo la parte de la página que necesitas", lambda: m("recortar"), True),
+            ("Organizar páginas", "#", "#E07A1F", "Números de página", "Página 1 de 10, al pie o arriba", self.page_numbers, True),
+            ("Organizar páginas", "💧", "#E07A1F", "Marca de agua", "CONFIDENCIAL, BORRADOR o lo que quieras", self.watermark, True),
+            ("Organizar páginas", "≡", "#E07A1F", "Encabezado y pie", "Texto fijo arriba y abajo de cada página", self.header_footer, True),
+
+            ("OCR", "🔎", "#1F8A70", "OCR: PDF buscable", "Convierte escaneos en texto que se puede buscar y copiar", self.ocr_dialog, True),
+            ("OCR", "📝", "#1F8A70", "OCR a Word", "De un escaneo a un Word editable", lambda: self.ocr_dialog(target="docx"), True),
+            ("OCR", "📄", "#1F8A70", "OCR a texto", "Saca el texto de un escaneo en .txt", lambda: self.ocr_dialog(target="txt"), True),
+
+            ("Proteger", "🔒", "#8E3B46", "Poner contraseña", "Cifrado AES-256 y permisos de impresión y copia", self.encrypt_dialog, True),
+            ("Proteger", "🔓", "#8E3B46", "Quitar contraseña", "Guarda una copia sin contraseña", self.decrypt, True),
+            ("Proteger", "⬛", "#8E3B46", "Ocultar datos", "Elimina cédulas, correos, teléfonos o palabras", self.redact_dialog, True),
+            ("Proteger", "▩", "#8E3B46", "Ocultar zona", "Tacha en negro un área de la página", lambda: m("ocultar"), True),
+            ("Proteger", "🧹", "#8E3B46", "Quitar datos ocultos", "Borra autor, programa y fechas del archivo", self.clean_meta, True),
+
+            ("Más herramientas", "🗜", "#3D5A80", "Comprimir PDF", "Reduce el tamaño para enviarlo por correo", self.compress_dialog, True),
+            ("Más herramientas", "⇆", "#3D5A80", "Comparar PDF", "Muestra qué cambió entre dos versiones", self.compare, True),
+            ("Más herramientas", "▣", "#3D5A80", "Aplanar", "Fija formularios, firmas y notas", self.flatten, True),
+            ("Más herramientas", "ℹ", "#3D5A80", "Propiedades", "Título, autor y datos del documento", self.properties, True),
+        ]
+
+    def _mode_tool(self, mode):
+        self.show_welcome(False)
+        for b in self.mode_group.buttons():
+            if b.isCheckable() and b.text().strip().endswith({"editar": "Editar texto", "texto": "Agregar texto"}.get(mode, "\x00")):
+                b.setChecked(True)
+        self.set_mode(mode)
+
+    def _run_tool(self, fn, needs_doc):
+        if needs_doc and not self.doc:
+            self.open_dialog()
+            if not self.doc:
+                return
+        if needs_doc:
+            self.show_welcome(False)
+        fn()
+
     def _welcome(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setAlignment(Qt.AlignCenter)
-        box = QFrame()
-        box.setMaximumWidth(760)
-        box.setStyleSheet("QFrame{background:white;border-radius:16px}")
-        bl = QVBoxLayout(box)
-        bl.setContentsMargins(48, 40, 48, 40)
-        bl.setSpacing(14)
-        t = QLabel(f"<span style='font-size:30px;font-weight:800;color:#13202A'>{APP}</span>")
-        s = QLabel("Abre un PDF o arrástralo a esta ventana. También puedes empezar con una de estas tareas:")
-        s.setWordWrap(True)
-        s.setStyleSheet("color:#5B6872;font-size:14px")
-        bl.addWidget(t)
-        bl.addWidget(s)
-        ob = QPushButton("Abrir PDF")
+        outer = QScrollArea()
+        outer.setWidgetResizable(True)
+        outer.setFrameShape(QFrame.NoFrame)
+        page = QWidget(objectName="home")
+        outer.setWidget(page)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 24)
+        root.setSpacing(0)
+
+        # cabecera
+        head = QFrame(objectName="homehead")
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(36, 26, 36, 26)
+        hl.setSpacing(16)
+        logo = QLabel()
+        icon = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "assets" / "icono.png"
+        if icon.exists():
+            logo.setPixmap(QPixmap(str(icon)).scaled(54, 54, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        hl.addWidget(logo)
+        tl = QVBoxLayout()
+        tl.setSpacing(2)
+        t = QLabel(APP)
+        t.setStyleSheet("font-size:26px;font-weight:800;color:#13202A")
+        st = QLabel("¿Qué quieres hacer hoy?")
+        st.setStyleSheet("font-size:14px;color:#5B6872")
+        tl.addWidget(t)
+        tl.addWidget(st)
+        hl.addLayout(tl)
+        hl.addStretch(1)
+        self.tool_search = QLineEdit()
+        self.tool_search.setPlaceholderText("🔍 Buscar herramienta…  (ej: firmar, word, comprimir)")
+        self.tool_search.setFixedWidth(340)
+        self.tool_search.setMinimumHeight(38)
+        self.tool_search.textChanged.connect(self._filter_tiles)
+        hl.addWidget(self.tool_search)
+        ob = QPushButton("📂  Abrir PDF")
         ob.setProperty("class", "primary")
+        ob.setMinimumHeight(40)
         ob.clicked.connect(self.open_dialog)
-        bl.addWidget(ob, alignment=Qt.AlignLeft)
-        grid = QHBoxLayout()
-        grid.setSpacing(10)
-        for text, slot in (("Unir varios PDF", self.merge_files), ("Convertir archivos a PDF", self.files_to_pdf),
-                           ("Imágenes a PDF", self.images_to_pdf_dialog), ("OCR a un escaneo", self.ocr_from_welcome)):
-            b = QPushButton(text)
-            b.setProperty("class", "ghost")
-            b.clicked.connect(slot)
-            grid.addWidget(b)
-        bl.addLayout(grid)
+        hl.addWidget(ob)
+        root.addWidget(head)
+
+        # aviso de documento abierto
+        self.home_doc_bar = QFrame(objectName="docbar")
+        dl = QHBoxLayout(self.home_doc_bar)
+        dl.setContentsMargins(36, 10, 36, 10)
+        self.home_doc_lbl = QLabel()
+        dl.addWidget(self.home_doc_lbl)
+        dl.addStretch(1)
+        back = QPushButton("Volver al documento →")
+        back.setProperty("class", "ghost")
+        back.clicked.connect(lambda: self.show_welcome(False))
+        dl.addWidget(back)
+        root.addWidget(self.home_doc_bar)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(36, 18, 36, 0)
+        body.setSpacing(28)
+        root.addLayout(body)
+
+        # herramientas por categoría
+        tools_col = QVBoxLayout()
+        tools_col.setSpacing(6)
+        self.tiles: list[tuple[QWidget, str]] = []
+        self.cat_widgets: dict[str, tuple[QLabel, QWidget]] = {}
+        cats: dict[str, list] = {}
+        for item in self._catalog():
+            cats.setdefault(item[0], []).append(item)
+        for cat, items in cats.items():
+            lbl = QLabel(cat.upper())
+            lbl.setProperty("class", "section")
+            gw = QWidget()
+            grid = QGridLayout(gw)
+            grid.setContentsMargins(0, 4, 0, 12)
+            grid.setSpacing(10)
+            for k, (_, ic, color, title, desc, fn, needs) in enumerate(items):
+                tile = Tile(ic, color, title, desc, lambda f=fn, n=needs: self._run_tool(f, n))
+                grid.addWidget(tile, k // 4, k % 4)
+                self.tiles.append((tile, f"{title} {desc} {cat}".lower()))
+            for k in range(len(items), (len(items) + 3) // 4 * 4):  # mantener 4 columnas iguales
+                ph = QWidget()
+                ph.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                grid.addWidget(ph, k // 4, k % 4)
+            for c in range(4):
+                grid.setColumnStretch(c, 1)
+            tools_col.addWidget(lbl)
+            tools_col.addWidget(gw)
+            self.cat_widgets[cat] = (lbl, gw)
+        tools_col.addStretch(1)
+        body.addLayout(tools_col, 1)
+
+        # recientes
+        side = QFrame(objectName="recent")
+        side.setFixedWidth(290)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(18, 16, 18, 16)
+        sl.setSpacing(4)
+        rl = QLabel("ARCHIVOS RECIENTES")
+        rl.setProperty("class", "section")
+        sl.addWidget(rl)
         self.recent_box = QVBoxLayout()
-        bl.addLayout(self.recent_box)
-        lay.addWidget(box)
-        return w
+        self.recent_box.setSpacing(2)
+        sl.addLayout(self.recent_box)
+        sl.addStretch(1)
+        drop = QLabel("También puedes arrastrar archivos a esta ventana.\nVarios archivos a la vez = unirlos en un PDF.")
+        drop.setWordWrap(True)
+        drop.setProperty("class", "hint")
+        sl.addWidget(drop)
+        body.addWidget(side, 0, Qt.AlignTop)
+        return outer
+
+    def _filter_tiles(self, text):
+        q = text.strip().lower()
+        for tile, key in self.tiles:
+            tile.setVisible(not q or all(w in key for w in q.split()))
+        for cat, (lbl, gw) in self.cat_widgets.items():
+            any_vis = any(not t.isHidden() for t in gw.findChildren(Tile))
+            lbl.setVisible(any_vis)
+            gw.setVisible(any_vis)
 
     def _refresh_recent(self):
         while self.recent_box.count():
             it = self.recent_box.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
-        rec = [p for p in self._recent() if os.path.exists(p)][:6]
+        rec = [p for p in self._recent() if os.path.exists(p)][:10]
         if not rec:
+            e = QLabel("Aquí aparecerán los PDF que abras.")
+            e.setProperty("class", "hint")
+            self.recent_box.addWidget(e)
             return
-        lbl = QLabel("RECIENTES")
-        lbl.setProperty("class", "section")
-        self.recent_box.addWidget(lbl)
         for p in rec:
-            b = QPushButton(f"{Path(p).name}   ·   {Path(p).parent}")
-            b.setStyleSheet("text-align:left;border:0;padding:6px 2px;color:#0B4F4E")
+            b = QPushButton(f"📄  {Path(p).name}")
+            b.setToolTip(p)
+            b.setStyleSheet("QPushButton{text-align:left;border:0;padding:8px 6px;color:#1F2A33;border-radius:6px}"
+                            "QPushButton:hover{background:#EAF4F4;color:#0B4F4E}")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, x=p: self.open_path(x))
             self.recent_box.addWidget(b)
@@ -862,11 +1025,17 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------ estado
     def show_welcome(self, on: bool):
+        if not on and not self.doc:
+            return
         self.stack.setCurrentIndex(0 if on else 1)
         if on:
             self._refresh_recent()
+            self.tool_search.clear()
+            self.home_doc_bar.setVisible(bool(self.doc))
+            if self.doc:
+                self.home_doc_lbl.setText(f"Documento abierto: <b>{Path(self.path).name if self.path else 'Sin título'}</b> · las herramientas se aplican a este archivo")
         for a in (self.a_save, self.a_undo, self.a_redo):
-            a.setEnabled(not on)
+            a.setEnabled(bool(self.doc))
 
     def _need_doc(self, slot):
         if not self.doc and slot not in (self.files_to_pdf, self.images_to_pdf_dialog, self.merge_files):
@@ -1747,6 +1916,40 @@ class MainWindow(QMainWindow):
             self.doc.set_metadata(nm)
             self.dirty = True
             self._title()
+
+
+class Tile(QFrame):
+    """Botón grande de la página de inicio."""
+
+    def __init__(self, icon, color, title, desc, on_click):
+        super().__init__(objectName="tile")
+        self.on_click = on_click
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(86)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(12)
+        ic = QLabel(icon)
+        ic.setFixedSize(42, 42)
+        ic.setAlignment(Qt.AlignCenter)
+        ic.setStyleSheet(f"background:{color};color:white;border-radius:10px;font-size:18px;font-weight:800")
+        lay.addWidget(ic, 0, Qt.AlignTop)
+        tx = QVBoxLayout()
+        tx.setSpacing(3)
+        t = QLabel(title)
+        t.setStyleSheet("font-weight:700;font-size:14px;color:#13202A;background:transparent")
+        d = QLabel(desc)
+        d.setWordWrap(True)
+        d.setStyleSheet("color:#6B7780;font-size:12px;background:transparent")
+        tx.addWidget(t)
+        tx.addWidget(d)
+        tx.addStretch(1)
+        lay.addLayout(tx, 1)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
+            self.on_click()
 
 
 class OrderDialog(QDialog):
