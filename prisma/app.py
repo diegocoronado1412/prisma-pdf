@@ -216,9 +216,9 @@ class InlineEditor(QFrame):
         self.bold_btn = QToolButton(text="B", checkable=True, checked=bold)
         self.color_btn = QToolButton(text="A")
         self.color_btn.setToolTip("Color de la letra")
-        ok = QToolButton(text="✓  Aplicar")
+        ok = QToolButton(text="Aplicar")
         ok.setToolTip("Aplicar (Enter)")
-        no = QToolButton(text="✕")
+        no = QToolButton(text="Cancelar")
         no.setToolTip("Cancelar (Esc)")
         for w in (self.font_box, self.size_box, self.bold_btn, self.color_btn, ok, no):
             bl.addWidget(w)
@@ -774,26 +774,26 @@ class MainWindow(QMainWindow):
             tb.addAction(a)
             return a
 
-        act("🏠 Inicio", lambda: self.show_welcome(True), "Ctrl+H")
-        act("📂 Abrir", self.open_dialog, "Ctrl+O")
-        self.a_save = act("💾 Guardar", self.save, "Ctrl+S")
+        act("Inicio", lambda: self.show_welcome(True), "Ctrl+H")
+        act("Abrir", self.open_dialog, "Ctrl+O")
+        self.a_save = act("Guardar", self.save, "Ctrl+S")
         act("Guardar como…", self.save_as, "Ctrl+Shift+S")
         tb.addSeparator()
-        self.a_undo = act("↶", self.do_undo, "Ctrl+Z", "Deshacer (Ctrl+Z)")
-        self.a_redo = act("↷", self.do_redo, "Ctrl+Y", "Rehacer (Ctrl+Y)")
+        self.a_undo = act("Deshacer", self.do_undo, "Ctrl+Z", "Deshacer (Ctrl+Z)")
+        self.a_redo = act("Rehacer", self.do_redo, "Ctrl+Y", "Rehacer (Ctrl+Y)")
         tb.addSeparator()
-        act("－", lambda: self.zoom_by(1 / 1.2), "Ctrl+-")
+        act("-", lambda: self.zoom_by(1 / 1.2), "Ctrl+-")
         self.zoom_lbl = QLabel("100%")
         self.zoom_lbl.setMinimumWidth(46)
         self.zoom_lbl.setAlignment(Qt.AlignCenter)
         tb.addWidget(self.zoom_lbl)
-        act("＋", lambda: self.zoom_by(1.2), "Ctrl+=")
-        act("↔ Ajustar", lambda: self.doc and (self.view.fit_width(self.doc), self._zoom_label()))
+        act("+", lambda: self.zoom_by(1.2), "Ctrl+=")
+        act("Ajustar", lambda: self.doc and (self.view.fit_width(self.doc), self._zoom_label()))
         tb.addSeparator()
         self.mode_buttons = {}
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
-        for key, label in (("mano", "✋ Mover"), ("editar", "✎ Editar texto"), ("texto", "T Agregar texto")):
+        for key, label in (("mano", "Mover"), ("editar", "Editar texto"), ("texto", "Agregar texto")):
             b = QToolButton()
             b.setText(label)
             b.setCheckable(True)
@@ -808,7 +808,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("🔍 Buscar  (Ctrl+F)")
+        self.search.setPlaceholderText("Buscar  (Ctrl+F)")
         self.search.setFixedWidth(200)
         self.search.returnPressed.connect(self.do_search)
         tb.addWidget(self.search)
@@ -883,49 +883,49 @@ class MainWindow(QMainWindow):
         """(categoría, ícono, color, título, descripción, acción, necesita documento)"""
         m = self._mode_tool
         return [
-            ("Editar", "✎", "#0E7C7B", "Editar texto", "Cambia el texto del PDF haciendo clic en el renglón", lambda: m("editar"), True),
+            ("Editar", "", "#0E7C7B", "Editar texto", "Cambia el texto del PDF haciendo clic en el renglón", lambda: m("editar"), True),
             ("Editar", "T", "#0E7C7B", "Agregar texto", "Escribe en cualquier parte de la página", lambda: m("texto"), True),
-            ("Editar", "⇄", "#0E7C7B", "Buscar y reemplazar", "Cambia una palabra o frase en todo el documento", self.find_replace, True),
-            ("Editar", "✍", "#0E7C7B", "Firmar", "Dibuja tu firma, úsala desde una foto o guárdala", self.sign, True),
-            ("Editar", "🖼", "#0E7C7B", "Insertar imagen", "Logos, sellos o fotos dentro del PDF", self.insert_image, True),
-            ("Editar", "☑", "#0E7C7B", "Llenar formulario", "Completa los campos de un formulario PDF", self.form_dialog, True),
-            ("Editar", "▮", "#0E7C7B", "Resaltar y comentar", "Resalta, subraya, tacha o deja notas", lambda: m("resaltar"), True),
-            ("Editar", "⬜", "#0E7C7B", "Borrar parte de la página", "Tapa con el mismo color del fondo", lambda: m("borrar"), True),
+            ("Editar", "", "#0E7C7B", "Buscar y reemplazar", "Cambia una palabra o frase en todo el documento", self.find_replace, True),
+            ("Editar", "", "#0E7C7B", "Firmar", "Dibuja tu firma, úsala desde una foto o guárdala", self.sign, True),
+            ("Editar", "", "#0E7C7B", "Insertar imagen", "Logos, sellos o fotos dentro del PDF", self.insert_image, True),
+            ("Editar", "", "#0E7C7B", "Llenar formulario", "Completa los campos de un formulario PDF", self.form_dialog, True),
+            ("Editar", "", "#0E7C7B", "Resaltar y comentar", "Resalta, subraya, tacha o deja notas", lambda: m("resaltar"), True),
+            ("Editar", "", "#0E7C7B", "Borrar parte de la página", "Tapa con el mismo color del fondo", lambda: m("borrar"), True),
 
             ("Convertir desde PDF", "W", "#2B5797", "PDF a Word", "Documento editable con párrafos y tablas", lambda: self.export("docx"), True),
             ("Convertir desde PDF", "X", "#1E7145", "PDF a Excel", "Las tablas pasan a hojas de cálculo", lambda: self.export("xlsx"), True),
             ("Convertir desde PDF", "P", "#C43E1C", "PDF a PowerPoint", "Cada página como diapositiva", lambda: self.export("pptx"), True),
-            ("Convertir desde PDF", "🖼", "#7A4FBF", "PDF a imágenes", "JPG o PNG en la calidad que quieras", lambda: self.export("img"), True),
-            ("Convertir desde PDF", "≡", "#55626C", "PDF a texto", "Solo el texto, en un archivo .txt", lambda: self.export("txt"), True),
+            ("Convertir desde PDF", "", "#7A4FBF", "PDF a imágenes", "JPG o PNG en la calidad que quieras", lambda: self.export("img"), True),
+            ("Convertir desde PDF", "", "#55626C", "PDF a texto", "Solo el texto, en un archivo .txt", lambda: self.export("txt"), True),
             ("Convertir desde PDF", "</>", "#55626C", "PDF a HTML", "Para publicarlo como página web", lambda: self.export("html"), True),
 
-            ("Crear PDF", "⇪", "#D1495B", "Office a PDF", "Word, Excel, PowerPoint y más a PDF", self.files_to_pdf, False),
-            ("Crear PDF", "🖼", "#D1495B", "Imágenes a PDF", "Fotos o escaneos en un solo PDF", self.images_to_pdf_dialog, False),
-            ("Crear PDF", "⧉", "#D1495B", "Unir archivos", "Varios PDF, imágenes o documentos en uno", self.merge_files, False),
+            ("Crear PDF", "", "#D1495B", "Office a PDF", "Word, Excel, PowerPoint y más a PDF", self.files_to_pdf, False),
+            ("Crear PDF", "", "#D1495B", "Imágenes a PDF", "Fotos o escaneos en un solo PDF", self.images_to_pdf_dialog, False),
+            ("Crear PDF", "", "#D1495B", "Unir archivos", "Varios PDF, imágenes o documentos en uno", self.merge_files, False),
 
-            ("Organizar páginas", "⟳", "#E07A1F", "Girar páginas", "Endereza páginas de lado o al revés", self.rotate_dialog, True),
-            ("Organizar páginas", "🗑", "#E07A1F", "Eliminar páginas", "Quita las páginas que sobran", self.delete_dialog, True),
-            ("Organizar páginas", "⤴", "#E07A1F", "Extraer páginas", "Saca unas páginas a un PDF nuevo", self.extract_dialog, True),
-            ("Organizar páginas", "✂", "#E07A1F", "Dividir PDF", "Por página, por rangos o por tamaño", self.split_dialog, True),
-            ("Organizar páginas", "＋", "#E07A1F", "Insertar páginas", "Agrega otro archivo dentro del PDF", self.insert_file, True),
-            ("Organizar páginas", "⬚", "#E07A1F", "Recortar márgenes", "Deja solo la parte de la página que necesitas", lambda: m("recortar"), True),
+            ("Organizar páginas", "", "#E07A1F", "Girar páginas", "Endereza páginas de lado o al revés", self.rotate_dialog, True),
+            ("Organizar páginas", "", "#E07A1F", "Eliminar páginas", "Quita las páginas que sobran", self.delete_dialog, True),
+            ("Organizar páginas", "", "#E07A1F", "Extraer páginas", "Saca unas páginas a un PDF nuevo", self.extract_dialog, True),
+            ("Organizar páginas", "", "#E07A1F", "Dividir PDF", "Por página, por rangos o por tamaño", self.split_dialog, True),
+            ("Organizar páginas", "", "#E07A1F", "Insertar páginas", "Agrega otro archivo dentro del PDF", self.insert_file, True),
+            ("Organizar páginas", "", "#E07A1F", "Recortar márgenes", "Deja solo la parte de la página que necesitas", lambda: m("recortar"), True),
             ("Organizar páginas", "#", "#E07A1F", "Números de página", "Página 1 de 10, al pie o arriba", self.page_numbers, True),
-            ("Organizar páginas", "💧", "#E07A1F", "Marca de agua", "CONFIDENCIAL, BORRADOR o lo que quieras", self.watermark, True),
-            ("Organizar páginas", "≡", "#E07A1F", "Encabezado y pie", "Texto fijo arriba y abajo de cada página", self.header_footer, True),
+            ("Organizar páginas", "", "#E07A1F", "Marca de agua", "CONFIDENCIAL, BORRADOR o lo que quieras", self.watermark, True),
+            ("Organizar páginas", "", "#E07A1F", "Encabezado y pie", "Texto fijo arriba y abajo de cada página", self.header_footer, True),
 
-            ("OCR", "🔎", "#1F8A70", "OCR: PDF buscable", "Convierte escaneos en texto que se puede buscar y copiar", self.ocr_dialog, True),
-            ("OCR", "📝", "#1F8A70", "OCR a Word", "De un escaneo a un Word editable", lambda: self.ocr_dialog(target="docx"), True),
-            ("OCR", "📄", "#1F8A70", "OCR a texto", "Saca el texto de un escaneo en .txt", lambda: self.ocr_dialog(target="txt"), True),
+            ("OCR", "", "#1F8A70", "OCR: PDF buscable", "Convierte escaneos en texto que se puede buscar y copiar", self.ocr_dialog, True),
+            ("OCR", "", "#1F8A70", "OCR a Word", "De un escaneo a un Word editable", lambda: self.ocr_dialog(target="docx"), True),
+            ("OCR", "", "#1F8A70", "OCR a texto", "Saca el texto de un escaneo en .txt", lambda: self.ocr_dialog(target="txt"), True),
 
-            ("Proteger", "🔒", "#8E3B46", "Poner contraseña", "Cifrado AES-256 y permisos de impresión y copia", self.encrypt_dialog, True),
-            ("Proteger", "🔓", "#8E3B46", "Quitar contraseña", "Guarda una copia sin contraseña", self.decrypt, True),
-            ("Proteger", "⬛", "#8E3B46", "Ocultar datos", "Elimina cédulas, correos, teléfonos o palabras", self.redact_dialog, True),
-            ("Proteger", "▩", "#8E3B46", "Ocultar zona", "Tacha en negro un área de la página", lambda: m("ocultar"), True),
-            ("Proteger", "🧹", "#8E3B46", "Quitar datos ocultos", "Borra autor, programa y fechas del archivo", self.clean_meta, True),
+            ("Proteger", "", "#8E3B46", "Poner contraseña", "Cifrado AES-256 y permisos de impresión y copia", self.encrypt_dialog, True),
+            ("Proteger", "", "#8E3B46", "Quitar contraseña", "Guarda una copia sin contraseña", self.decrypt, True),
+            ("Proteger", "", "#8E3B46", "Ocultar datos", "Elimina cédulas, correos, teléfonos o palabras", self.redact_dialog, True),
+            ("Proteger", "", "#8E3B46", "Ocultar zona", "Tacha en negro un área de la página", lambda: m("ocultar"), True),
+            ("Proteger", "", "#8E3B46", "Quitar datos ocultos", "Borra autor, programa y fechas del archivo", self.clean_meta, True),
 
-            ("Más herramientas", "🗜", "#3D5A80", "Comprimir PDF", "Reduce el tamaño para enviarlo por correo", self.compress_dialog, True),
-            ("Más herramientas", "⇆", "#3D5A80", "Comparar PDF", "Muestra qué cambió entre dos versiones", self.compare, True),
-            ("Más herramientas", "▣", "#3D5A80", "Aplanar", "Fija formularios, firmas y notas", self.flatten, True),
+            ("Más herramientas", "", "#3D5A80", "Comprimir PDF", "Reduce el tamaño para enviarlo por correo", self.compress_dialog, True),
+            ("Más herramientas", "", "#3D5A80", "Comparar PDF", "Muestra qué cambió entre dos versiones", self.compare, True),
+            ("Más herramientas", "", "#3D5A80", "Aplanar", "Fija formularios, firmas y notas", self.flatten, True),
             ("Más herramientas", "ℹ", "#3D5A80", "Propiedades", "Título, autor y datos del documento", self.properties, True),
         ]
 
@@ -976,12 +976,12 @@ class MainWindow(QMainWindow):
         hl.addLayout(tl)
         hl.addStretch(1)
         self.tool_search = QLineEdit()
-        self.tool_search.setPlaceholderText("🔍 Buscar herramienta…  (ej: firmar, word, comprimir)")
+        self.tool_search.setPlaceholderText("Buscar herramienta…  (ej: firmar, word, comprimir)")
         self.tool_search.setFixedWidth(340)
         self.tool_search.setMinimumHeight(38)
         self.tool_search.textChanged.connect(self._filter_tiles)
         hl.addWidget(self.tool_search)
-        ob = QPushButton("📂  Abrir PDF")
+        ob = QPushButton("Abrir PDF")
         ob.setProperty("class", "primary")
         ob.setMinimumHeight(40)
         ob.clicked.connect(self.open_dialog)
@@ -1078,7 +1078,7 @@ class MainWindow(QMainWindow):
             self.recent_box.addWidget(e)
             return
         for p in rec:
-            b = QPushButton(f"📄  {Path(p).name}")
+            b = QPushButton(f"{Path(p).name}")
             b.setToolTip(p)
             b.setStyleSheet("QPushButton{text-align:left;border:0;padding:8px 6px;color:#1F2A33;border-radius:6px}"
                             "QPushButton:hover{background:#EAF4F4;color:#0B4F4E}")
@@ -1125,36 +1125,36 @@ class MainWindow(QMainWindow):
 
         tab("Editar", [
             "Texto",
-            ("✎  Editar texto existente", "editar", "mode"),
-            ("T   Agregar texto", "texto", "mode"),
-            ("⇄  Buscar y reemplazar", self.find_replace),
+            ("Editar texto existente", "editar", "mode"),
+            ("Agregar texto", "texto", "mode"),
+            ("Buscar y reemplazar", self.find_replace),
             "Firmar e insertar",
-            ("✍  Firmar", self.sign),
-            ("🖼  Insertar imagen", self.insert_image),
+            ("Firmar", self.sign),
+            ("Insertar imagen", self.insert_image),
             "Comentar",
-            ("▮  Resaltar", "resaltar", "mode"),
-            ("U̲  Subrayar", "subrayar", "mode"),
-            ("S̶  Tachar texto", "tachar", "mode"),
-            ("💬  Nota", "nota", "mode"),
-            ("▭  Rectángulo", "rect", "mode"),
-            ("◯  Círculo", "circulo", "mode"),
+            ("Resaltar", "resaltar", "mode"),
+            ("Subrayar", "subrayar", "mode"),
+            ("Tachar texto", "tachar", "mode"),
+            ("Nota", "nota", "mode"),
+            ("Rectángulo", "rect", "mode"),
+            ("Círculo", "circulo", "mode"),
             "Tapar",
-            ("⬜  Borrar (con el color del fondo)", "borrar", "mode"),
+            ("Borrar (con el color del fondo)", "borrar", "mode"),
         ])
         tab("Páginas", [
             "Organizar (también arrastrando miniaturas)",
-            ("⟳  Girar páginas", self.rotate_dialog),
-            ("🗑  Eliminar páginas", self.delete_dialog),
-            ("⤴  Extraer páginas", self.extract_dialog),
-            ("✂  Dividir PDF", self.split_dialog),
-            ("＋  Insertar página en blanco", self.insert_blank),
-            ("📎  Insertar otro archivo", self.insert_file),
-            ("⧉  Unir con otros PDF", self.merge_with_current),
-            ("⬚  Recortar márgenes", "recortar", "mode"),
+            ("Girar páginas", self.rotate_dialog),
+            ("Eliminar páginas", self.delete_dialog),
+            ("Extraer páginas", self.extract_dialog),
+            ("Dividir PDF", self.split_dialog),
+            ("Insertar página en blanco", self.insert_blank),
+            ("Insertar otro archivo", self.insert_file),
+            ("Unir con otros PDF", self.merge_with_current),
+            ("Recortar márgenes", "recortar", "mode"),
             "Numerar y marcar",
             ("#   Números de página", self.page_numbers),
-            ("≡   Encabezado y pie", self.header_footer),
-            ("💧  Marca de agua", self.watermark),
+            ("Encabezado y pie", self.header_footer),
+            ("Marca de agua", self.watermark),
         ])
         tab("Convertir", [
             "Desde PDF",
@@ -1171,27 +1171,27 @@ class MainWindow(QMainWindow):
         ])
         tab("OCR", [
             "Reconocer texto de escaneos",
-            ("🔎  Hacer OCR (PDF buscable)", self.ocr_dialog),
-            ("📝  OCR directo a Word", lambda: self.ocr_dialog(target="docx")),
-            ("📄  OCR a texto", lambda: self.ocr_dialog(target="txt")),
+            ("Hacer OCR (PDF buscable)", self.ocr_dialog),
+            ("OCR directo a Word", lambda: self.ocr_dialog(target="docx")),
+            ("OCR a texto", lambda: self.ocr_dialog(target="txt")),
         ])
         tab("Proteger", [
             "Contraseñas",
-            ("🔒  Poner contraseña", self.encrypt_dialog),
-            ("🔓  Quitar contraseña", self.decrypt),
+            ("Poner contraseña", self.encrypt_dialog),
+            ("Quitar contraseña", self.decrypt),
             "Información sensible",
-            ("⬛  Ocultar zona (tachar en negro)", "ocultar", "mode"),
-            ("⬛  Ocultar palabras o datos", self.redact_dialog),
-            ("🧹  Quitar datos ocultos (autor, etc.)", self.clean_meta),
+            ("Ocultar zona (tachar en negro)", "ocultar", "mode"),
+            ("Ocultar palabras o datos", self.redact_dialog),
+            ("Quitar datos ocultos (autor, etc.)", self.clean_meta),
         ])
         tab("Más", [
             "Optimizar",
-            ("🗜  Comprimir (reducir tamaño)", self.compress_dialog),
+            ("Comprimir (reducir tamaño)", self.compress_dialog),
             "Formularios",
-            ("☑  Llenar formulario", self.form_dialog),
-            ("▣  Aplanar (fijar formulario y notas)", self.flatten),
+            ("Llenar formulario", self.form_dialog),
+            ("Aplanar (fijar formulario y notas)", self.flatten),
             "Otros",
-            ("⇆  Comparar con otro PDF", self.compare),
+            ("Comparar con otro PDF", self.compare),
             ("ℹ  Propiedades del documento", self.properties),
         ])
 
@@ -1443,15 +1443,15 @@ class MainWindow(QMainWindow):
         m = QMenu(self)
         n = len(pages)
         lbl = f"{n} página{'s' if n > 1 else ''}"
-        m.addAction(f"⟲ Girar a la izquierda ({lbl})", lambda: self._rotate(pages, -90))
-        m.addAction(f"⟳ Girar a la derecha ({lbl})", lambda: self._rotate(pages, 90))
-        m.addAction(f"⤴ Extraer ({lbl})…", lambda: self._extract(pages))
-        m.addAction(f"⧉ Duplicar ({lbl})", lambda: self._duplicate(pages))
+        m.addAction(f"Girar a la izquierda ({lbl})", lambda: self._rotate(pages, -90))
+        m.addAction(f"Girar a la derecha ({lbl})", lambda: self._rotate(pages, 90))
+        m.addAction(f"Extraer ({lbl})…", lambda: self._extract(pages))
+        m.addAction(f"Duplicar ({lbl})", lambda: self._duplicate(pages))
         m.addSeparator()
-        m.addAction("＋ Página en blanco después", lambda: self._blank(pages[-1]))
-        m.addAction("📎 Insertar archivo después…", lambda: self.insert_file(pages[-1]))
+        m.addAction("Página en blanco después", lambda: self._blank(pages[-1]))
+        m.addAction("Insertar archivo después…", lambda: self.insert_file(pages[-1]))
         m.addSeparator()
-        m.addAction(f"🗑 Eliminar ({lbl})", lambda: self._delete(pages))
+        m.addAction(f"Eliminar ({lbl})", lambda: self._delete(pages))
         m.exec(self.thumbs.mapToGlobal(pos))
 
     # ------------------------------------------------ vista
@@ -2152,6 +2152,9 @@ class Tile(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(12)
+        if not icon:
+            words = [w for w in title.replace("/", " ").split() if w[0].isalnum() and w.lower() not in ("a", "de", "con", "el", "la", "y")]
+            icon = "".join(w[0] for w in words[:2]).upper()
         ic = QLabel(icon)
         ic.setFixedSize(42, 42)
         ic.setAlignment(Qt.AlignCenter)
