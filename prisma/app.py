@@ -1577,7 +1577,8 @@ class MainWindow(QMainWindow):
         info = core.line_at(page, p)
         if not info:
             return
-        st = core.sample_style(page, info["rect"])
+        # en renglones encimados line_at ya trae el estilo medido solo con la tinta de ese renglón
+        st = info.get("style") or core.sample_style(page, info["rect"])
         info["style"] = st
         code = "hebo" if st["bold"] else "helv"
         size = core.estimate_size(info, st, code)
