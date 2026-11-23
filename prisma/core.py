@@ -469,3 +469,136 @@ def flatten(doc: pymupdf.Document) -> pymupdf.Document:
         doc.bake()
         return doc
     return pymupdf.open("pdf", doc.convert_to_pdf())
+
+# ---------------------------------------------------------------- edición de páginas escaneadas
+
+def is_scanned(page: pymupdf.Page) -> bool:
+    """La página es básicamente una imagen (escaneo o PDF 'aplanado')."""
+    area = abs(page.rect)
+    covered = sum(abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info())
+    return covered > 0.6 * area
+
+
+def has_text(page: pymupdf.Page) -> bool:
+    return len(page.get_text("words")) > 3
+
+
+def line_at(page: pymupdf.Page, point: pymupdf.Point) -> dict | None:
+    """Renglón bajo el punto armado con palabras (sirve para texto OCR, que viene palabra por palabra)."""
+    words = page.get_text("words")
+    hit = None
+    for w in words:
+        r = pymupdf.Rect(w[:4])
+        if (r + (-2, -2, 2, 2)).contains(point):
+            hit = r
+            break
+    if hit is None:
+        return None
+    h = hit.height
+    cy = (hit.y0 + hit.y1) / 2
+    same = list((pymupdf.Rect(w[:4]), w[4]) for w in words
+                  if abs((w[1] + w[3]) / 2 - cy) < h * 0.45 and abs((w[3] - w[1]) - h) < h * 0.6)
+    same.sort(key=lambda x: x[0].x0)
+    # quedarse con el grupo de palabras contiguas que incluye la palabra tocada
+    groups, cur = [], []
+    for r, t in same:
+        if cur and r.x0 - cur[-1][0].x1 > h * 1.6:
+            groups.append(cur)
+            cur = []
+        cur.append((r, t))
+    if cur:
+        groups.append(cur)
+    for g in groups:
+        rect = pymupdf.Rect(g[0][0])
+        for r, _ in g[1:]:
+            rect |= r
+        if (rect + (-2, -2, 2, 2)).contains(point):
+            return {"rect": rect, "text": " ".join(t for _, t in g), "words": [r for r, _ in g]}
+    return None
+
+
+def sample_style(page: pymupdf.Page, rect: pymupdf.Rect) -> dict:
+    """Mira los pixeles para sacar color de fondo, color de la letra, tamaño y si es negrilla."""
+    import numpy as np
+
+    pad = max(rect.height * 0.35, 2)
+    clip = (rect + (-pad, -pad, pad, pad)) & page.rect
+    zoom = 4
+    pix = page.get_pixmap(clip=clip, matrix=pymupdf.Matrix(zoom, zoom), alpha=False, colorspace=pymupdf.csRGB)
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3).astype(int)
+    border = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+    bg = np.median(border, axis=0)
+    ix0, iy0 = int((rect.x0 - clip.x0) * zoom), int((rect.y0 - clip.y0) * zoom)
+    ix1, iy1 = int((rect.x1 - clip.x0) * zoom), int((rect.y1 - clip.y0) * zoom)
+    inner = a[iy0:iy1, ix0:ix1].reshape(-1, 3)
+    dist = np.abs(inner - bg).sum(axis=1)
+    ink_mask = dist > 120
+    ink = inner[ink_mask] if ink_mask.any() else inner[dist >= np.percentile(dist, 90)]
+    if len(ink):  # solo el centro de los trazos (los bordes salen claros por el suavizado)
+        d_ink = np.abs(ink - bg).sum(axis=1)
+        core_px = ink[d_ink >= np.percentile(d_ink, 75)]
+        fg = np.median(core_px, axis=0)
+    else:
+        fg = np.array([0, 0, 0])
+    # altura real de la tinta: banda continua de renglones con tinta alrededor del centro
+    band = (np.abs(a[iy0:iy1, ix0:ix1] - bg).sum(axis=2) > 120).mean(axis=1) > 0.01
+    rows = np.array([], int)
+    if band.any():
+        c = len(band) // 2
+        if not band[c]:
+            ink_rows = np.where(band)[0]
+            c = ink_rows[np.argmin(np.abs(ink_rows - c))]
+        top = c
+        while top > 0 and band[top - 1]:
+            top -= 1
+        bot = c
+        while bot < len(band) - 1 and band[bot + 1]:
+            bot += 1
+        rows = np.arange(top, bot + 1)
+    ink_h = len(rows) / zoom if len(rows) else rect.height * 0.7
+    # grosor del trazo relativo a la altura de la letra -> negrilla
+    m = (np.abs(a[iy0:iy1, ix0:ix1] - bg).sum(axis=2) > 120)
+    runs = []
+    for row in m[rows] if len(rows) else m:
+        edges = np.diff(np.concatenate([[0], row.astype(int), [0]]))
+        starts, ends = np.where(edges == 1)[0], np.where(edges == -1)[0]
+        runs.extend(ends - starts)
+    stroke = float(np.median(runs)) / zoom if runs else 0
+    density = stroke / max(ink_h, 1)
+    return {"bg": tuple(bg / 255), "color": tuple(fg / 255), "size": round(max(ink_h / 0.9, 4), 1),
+            "bold": density > 0.175, "stroke_ratio": round(density, 3), "ink_top": rect.y0 + (rows[0] / zoom if len(rows) else 0),
+            "ink_bottom": rect.y0 + ((rows[-1] + 1) / zoom if len(rows) else rect.height)}
+
+
+def replace_scanned(page: pymupdf.Page, info: dict, new_text: str, size: float | None = None, color=None,
+                    fontname: str | None = None) -> None:
+    """Borra el renglón de la imagen (pixeles incluidos) rellenando con el color del fondo y escribe el texto nuevo."""
+    st = info.get("style") or sample_style(page, info["rect"])
+    rect = info["rect"] + (-1, -1, 1, 1)
+    page.add_redact_annot(rect, fill=st["bg"])
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                          text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+    if not new_text:
+        return
+    fn = fontname or ("hebo" if st["bold"] else "helv")
+    fs = size or estimate_size(info, st, fn)
+    desc = any(ch in info["text"] for ch in "gjpqyQ,;()")
+    baseline = st["ink_bottom"] - (fs * 0.21 if desc else 0)
+    page.insert_text((info["rect"].x0, baseline), new_text, fontsize=fs, fontname=fn, color=color or st["color"])
+
+
+def estimate_size(info: dict, st: dict, fontname: str = "helv") -> float:
+    """Tamaño de letra: por el ancho del renglón original (muy preciso) y, si no cuadra, por la altura de la tinta."""
+    by_h = st["size"]
+    if not any(ch in info["text"] for ch in "gjpqyQ,;()"):
+        by_h = by_h * 0.9 / 0.74  # sin letras que bajan la tinta es más baja
+    unit = pymupdf.get_text_length(info["text"], fontname, 1)
+    by_w = info["rect"].width / unit if unit else by_h
+    return round(by_w if 0.75 < by_w / by_h < 1.33 else by_h, 1)
+
+
+def cover_with_background(page: pymupdf.Page, rect: pymupdf.Rect) -> None:
+    """Tapa un área usando el color del fondo que la rodea (no siempre es blanco)."""
+    st = sample_style(page, rect)
+    page.add_redact_annot(rect, fill=st["bg"])
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
                                QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
-                               QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea, QSizePolicy, QSlider,
+                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
                                QSpinBox, QSplitter, QStackedWidget, QStatusBar, QTableWidget, QTableWidgetItem,
                                QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
@@ -83,41 +83,77 @@ class Worker(QObject):
             self.failed.emit(str(e) or e.__class__.__name__)
 
 
+class ProgressDialog(QDialog):
+    """Barra de progreso propia (QProgressDialog se re-pinta a sí mismo y puede trabarse con hilos)."""
+    canceled = Signal()
+
+    def __init__(self, parent, title):
+        super().__init__(parent)
+        self.setWindowTitle(APP)
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        lay = QVBoxLayout(self)
+        self.lbl = QLabel(title)
+        self.title = title
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 0)
+        self.bar.setTextVisible(True)
+        lay.addWidget(self.lbl)
+        lay.addWidget(self.bar)
+        b = QPushButton("Cancelar")
+        b.clicked.connect(self._cancel)
+        lay.addWidget(b, alignment=Qt.AlignRight)
+
+    def _cancel(self):
+        self.lbl.setText("Cancelando…")
+        self.canceled.emit()
+
+    def set_progress(self, a, b):
+        self.bar.setRange(0, b)
+        self.bar.setValue(a)
+        self.lbl.setText(f"{self.title}   {a} de {b}")
+
+    def reject(self):  # Esc = cancelar
+        self._cancel()
+
+    def show_if_running(self):
+        if self.thread_ref.isRunning():
+            self.open()
+
+    def finish(self, res):
+        self.thread_ref.quit()
+        self.done(0)
+        if self.on_done_cb:
+            self.on_done_cb(res)
+
+    def fail(self, msg):
+        self.thread_ref.quit()
+        self.done(0)
+        QMessageBox.warning(self.parent(), APP, f"No se pudo completar:\n\n{msg}")
+
+
 def run_task(parent, title: str, fn, *args, on_done=None, **kw):
-    """Ejecuta fn en otro hilo mostrando una barra de progreso. fn recibe progress=, cancel=."""
-    dlg = QProgressDialog(title, "Cancelar", 0, 0, parent)
-    dlg.setWindowTitle(APP)
-    dlg.setWindowModality(Qt.WindowModal)
-    dlg.setMinimumDuration(200)
-    dlg.setMinimumWidth(380)
+    """Ejecuta fn en otro hilo mostrando una barra de progreso. fn recibe progress=, cancel=.
+
+    Todas las señales del hilo se conectan a métodos de objetos que viven en el hilo de la ventana,
+    así Qt las entrega en cola y nunca se pinta nada desde el hilo de trabajo (en Mac eso cierra el programa).
+    """
+    dlg = ProgressDialog(parent, title)
     th = QThread(parent)
     w = Worker(fn, *args, **kw)
     w.moveToThread(th)
     th.started.connect(w.run)
-
-    def prog(a, b):
-        dlg.setMaximum(b)
-        dlg.setValue(a)
-        dlg.setLabelText(f"{title}\n{a} de {b}")
-
-    def finish(res):
-        dlg.reset()
-        th.quit()
-        if on_done:
-            on_done(res)
-
-    def fail(msg):
-        dlg.reset()
-        th.quit()
-        QMessageBox.warning(parent, APP, f"No se pudo completar:\n\n{msg}")
-
-    w.progress.connect(prog)
-    w.done.connect(finish)
-    w.failed.connect(fail)
+    dlg.on_done_cb = on_done
+    dlg.thread_ref = th
+    w.progress.connect(dlg.set_progress)
+    w.done.connect(dlg.finish)
+    w.failed.connect(dlg.fail)
     dlg.canceled.connect(lambda: setattr(w, "cancelled", True))
     th.finished.connect(w.deleteLater)
-    parent._tasks = getattr(parent, "_tasks", []) + [(th, w)]
+    parent._tasks = getattr(parent, "_tasks", []) + [(th, w, dlg)]
     th.start()
+    QTimer.singleShot(250, dlg.show_if_running)
 
 
 def simple(fn):
@@ -718,7 +754,7 @@ class MainWindow(QMainWindow):
             ("Editar", "🖼", "#0E7C7B", "Insertar imagen", "Logos, sellos o fotos dentro del PDF", self.insert_image, True),
             ("Editar", "☑", "#0E7C7B", "Llenar formulario", "Completa los campos de un formulario PDF", self.form_dialog, True),
             ("Editar", "▮", "#0E7C7B", "Resaltar y comentar", "Resalta, subraya, tacha o deja notas", lambda: m("resaltar"), True),
-            ("Editar", "⬜", "#0E7C7B", "Borrar con blanco", "Tapa una parte de la página", lambda: m("borrar"), True),
+            ("Editar", "⬜", "#0E7C7B", "Borrar parte de la página", "Tapa con el mismo color del fondo", lambda: m("borrar"), True),
 
             ("Convertir desde PDF", "W", "#2B5797", "PDF a Word", "Documento editable con párrafos y tablas", lambda: self.export("docx"), True),
             ("Convertir desde PDF", "X", "#1E7145", "PDF a Excel", "Las tablas pasan a hojas de cálculo", lambda: self.export("xlsx"), True),
@@ -967,7 +1003,7 @@ class MainWindow(QMainWindow):
             ("▭  Rectángulo", "rect", "mode"),
             ("◯  Círculo", "circulo", "mode"),
             "Tapar",
-            ("⬜  Borrar con blanco", "borrar", "mode"),
+            ("⬜  Borrar (con el color del fondo)", "borrar", "mode"),
         ])
         tab("Páginas", [
             "Organizar (también arrastrando miniaturas)",
@@ -1302,7 +1338,7 @@ class MainWindow(QMainWindow):
         "firma": "Dibuja un recuadro donde va la firma.",
         "imagen": "Dibuja un recuadro donde va la imagen.",
         "ocultar": "Dibuja un recuadro sobre lo que quieres ocultar. El contenido se elimina de verdad.",
-        "borrar": "Dibuja un recuadro sobre lo que quieres tapar con blanco.",
+        "borrar": "Dibuja un recuadro sobre lo que quieres borrar. Se rellena con el color del fondo.",
         "resaltar": "Arrastra sobre el texto que quieres resaltar.",
         "subrayar": "Arrastra sobre el texto que quieres subrayar.",
         "tachar": "Arrastra sobre el texto que quieres tachar.",
@@ -1339,7 +1375,13 @@ class MainWindow(QMainWindow):
         return pymupdf.Point(obj.x(), obj.y()) * m if isinstance(obj, QPointF) else obj * m
 
     def _on_hover(self, pno, pt):
-        info = core.span_at(self.doc[pno], self._to_page(pno, pt))
+        page = self.doc[pno]
+        if core.is_scanned(page):
+            info = core.line_at(page, self._to_page(pno, pt)) if core.has_text(page) else None
+            if not core.has_text(page):
+                self.hint_lbl.setText("  Esta página es una imagen escaneada: haz clic para reconocer el texto y poder editarlo.")
+        else:
+            info = core.span_at(page, self._to_page(pno, pt))
         vis = info["rect"] * self.doc[pno].rotation_matrix if info else None
         self.view.show_hover(pno, vis.normalize() if vis else None)
 
@@ -1347,6 +1389,8 @@ class MainWindow(QMainWindow):
         mode = self.view.mode
         page = self.doc[pno]
         p = self._to_page(pno, pt)
+        if mode == "editar" and core.is_scanned(page):
+            return self._edit_scanned(pno, p)
         if mode == "editar":
             info = core.span_at(page, p)
             if not info:
@@ -1382,6 +1426,49 @@ class MainWindow(QMainWindow):
                 core.add_note(page, p, t)
                 self.changed([pno])
 
+    SCAN_FONTS = {"Helvetica / Arial": "helv", "Helvetica / Arial negrilla": "hebo", "Times": "tiro",
+                  "Times negrilla": "tibo", "Courier": "cour"}
+
+    def _edit_scanned(self, pno, p):
+        page = self.doc[pno]
+        if not core.has_text(page):
+            r = QMessageBox.question(self, APP, "Este PDF es una imagen escaneada, por eso todavía no tiene texto editable.\n\n"
+                                                "¿Reconocer el texto ahora (OCR)? Después solo das clic en el renglón que quieras cambiar.")
+            if r == QMessageBox.Yes:
+                self._quick_ocr()
+            return
+        info = core.line_at(page, p)
+        if not info:
+            return
+        st = core.sample_style(page, info["rect"])
+        info["style"] = st
+        font_label = "Helvetica / Arial negrilla" if st["bold"] else "Helvetica / Arial"
+        fn = self.SCAN_FONTS[font_label]
+        d = FormDialog(self, "Editar texto (escaneo)", [
+            ("t", "Texto", line(info["text"])),
+            ("s", "Tamaño", spin(core.estimate_size(info, st, fn), 4, 200, 0.5, 1)),
+            ("c", "Color", ColorButton(tuple(float(c) for c in st["color"]))),
+            ("f", "Letra", combo(list(self.SCAN_FONTS), font_label)),
+        ], ok="Cambiar", note="Revisa que el texto reconocido esté bien escrito. Prisma borra el renglón de la imagen "
+                              "con el color del fondo y escribe el nuevo con tamaño y color parecidos.")
+        if d.exec():
+            self.snapshot()
+            core.replace_scanned(page, info, d.val("t"), d.val("s"), d.val("c"), self.SCAN_FONTS[d.val("f")])
+            self.view.show_hover(pno, None)
+            self.changed([pno])
+
+    def _quick_ocr(self):
+        src = self._temp_copy()
+        out_pdf = os.path.join(os.path.dirname(src), "ocr.pdf")
+
+        def fin(res):
+            self.snapshot()
+            self.doc = pymupdf.open("pdf", pymupdf.open(out_pdf).tobytes())
+            self.changed(structure=True)
+            self.view.set_mode("editar")
+            self.status.showMessage("Texto reconocido. Ahora haz clic en el renglón que quieres cambiar.", 8000)
+        run_task(self, "Reconociendo texto…", ocr.ocr_document, src, out_pdf, password=self.password, on_done=fin)
+
     def _on_drag(self, pno, vrect):
         mode = self.view.mode
         page = self.doc[pno]
@@ -1395,7 +1482,7 @@ class MainWindow(QMainWindow):
         elif mode == "ocultar":
             core.redact_rect(page, r)
         elif mode == "borrar":
-            core.whiteout(page, r)
+            core.cover_with_background(page, r)
         elif mode in ("resaltar", "subrayar", "tachar"):
             core.highlight(page, r, mode)
         elif mode in ("rect", "circulo"):
