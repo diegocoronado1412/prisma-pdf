@@ -50,6 +50,16 @@ if __name__ == "__main__":
     t=time.time()
     r = ocr.ocr_document(scan, os.path.join(T,"escaneado_ocr.pdf"), word_out=os.path.join(T,"ocr.docx"), txt_out=os.path.join(T,"ocr.txt"))
     print("ocr", r["pages"], "rotadas", r["rotated"], f"{time.time()-t:.1f}s")
+    import docx as _docx
+    for src in ("escaneado_ocr.pdf", "escaneado.pdf"):  # escaneo a Word: texto editable, no la foto de la hoja
+        convert.pdf_to_word(os.path.join(T, src), os.path.join(T, "scan_word.docx"))
+        wd = _docx.Document(os.path.join(T, "scan_word.docx"))
+        assert not any("image" in r.reltype for r in wd.part.rels.values()), src
+        wt = " ".join(p.text for p in wd.paragraphs)
+        assert "CONTRATO" in wt and "12.500.000" in wt, src
+        sizes = [r.font.size.pt for p in wd.paragraphs for r in p.runs if r.font.size]
+        assert all(9 <= s <= 14 for s in sizes), (src, sizes)
+    print("escaneo a word ok")
     o = pymupdf.open(os.path.join(T,"escaneado_ocr.pdf"))
     for i,p in enumerate(o):
         txt = p.get_text()

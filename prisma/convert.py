@@ -16,14 +16,236 @@ OTHER_EXT = {".txt", ".md", ".html", ".htm", ".xps", ".epub", ".svg"}
 
 
 def pdf_to_word(path: str, out: str, pages: list[int] | None = None, password: str = "", progress=None) -> str:
-    from pdf2docx import Converter
+    """PDF de texto -> pdf2docx (conserva el diseño). Si hay páginas escaneadas, se arma el Word con el
+    texto (del OCR o leído en el momento) en vez de pegar la foto de la página."""
+    doc = pymupdf.open(path)
+    if doc.needs_pass:
+        doc.authenticate(password)
+    sel = list(range(doc.page_count)) if pages is None else pages
+    if not any(_is_scan(doc[i]) for i in sel):
+        from pdf2docx import Converter
 
-    cv = Converter(path, password=password or None)
-    try:
-        cv.convert(out, pages=pages, multi_processing=False)
-    finally:
-        cv.close()
+        cv = Converter(path, password=password or None)
+        try:
+            cv.convert(out, pages=pages, multi_processing=False)
+        finally:
+            cv.close()
+        return out
+    return _rebuild_docx(doc, path, password, sel, out, progress)
+
+
+def _is_scan(page: pymupdf.Page) -> bool:
+    """La página es básicamente una foto (escaneo), tenga o no la capa de texto invisible del OCR."""
+    area = page.rect.width * page.rect.height
+    covered = 0.0
+    for img in page.get_images(full=True):
+        for r in page.get_image_rects(img[0]):
+            covered += (r & page.rect).width * (r & page.rect).height
+    return covered >= area * 0.6
+
+
+def _tokens(page: pymupdf.Page, scan: bool, path: str, password: str) -> tuple[list[dict], float, float]:
+    """Pedazos de texto con su caja en el sentido de lectura ("rect") y en coordenadas de la página sin
+    rotar ("prect", para mirar los pixeles). Devuelve también el ancho y alto de la hoja en sentido de lectura."""
+    W, H = page.rect.width, page.rect.height
+    rot, derot = page.rotation_matrix, page.derotation_matrix
+    if not scan:
+        toks = []
+        for b in page.get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                for sp in ln["spans"]:
+                    if sp["text"].strip():
+                        f = sp["font"].lower()
+                        r = pymupdf.Rect(sp["bbox"])
+                        toks.append({"rect": r * rot, "prect": r, "text": sp["text"].strip(), "size": sp["size"],
+                                     "bold": bool(sp["flags"] & 16) or "bold" in f or "black" in f,
+                                     "italic": bool(sp["flags"] & 2) or "italic" in f or "oblique" in f,
+                                     "color": sp["color"], "font": sp["font"]})
+        return toks, W, H
+    words = [(pymupdf.Rect(w[:4]), w[4]) for w in page.get_text("words") if w[4].strip()]
+    if sum(len(t) for _, t in words) >= 30:  # ya tiene la capa de texto del OCR
+        return [{"rect": r * rot, "prect": r, "text": t, "ocr": 0.89} for r, t in words], W, H
+    from . import ocr  # escaneo sin OCR: leerlo ahora
+    res = ocr.ocr_page_job(path, password, page.number, {"skip_text": False, "tessdata": ocr.tessdata_dir()})
+    turn = res.get("turn", 0)
+    toks = []
+    for w in res["words"]:
+        xs, ys = [q[0] for q in w["pts"]], [q[1] for q in w["pts"]]
+        vis = pymupdf.Rect(min(xs), min(ys), max(xs), max(ys))  # como se ve la página
+        x0, y0, x1, y1 = vis
+        if turn == 180:  # la hoja venía al revés: pasar al sentido de lectura
+            x0, y0, x1, y1 = W - x1, H - y1, W - x0, H - y0
+        elif turn == 90:
+            x0, y0, x1, y1 = H - y1, x0, H - y0, x1
+        elif turn == 270:
+            x0, y0, x1, y1 = y0, W - x1, y1, W - x0
+        toks.append({"rect": pymupdf.Rect(x0, y0, x1, y1), "prect": vis * derot, "text": w["text"], "ocr": 1.0})
+    return (toks, H, W) if turn in (90, 270) else (toks, W, H)
+
+
+def _lines(toks: list[dict]) -> list[dict]:
+    """Agrupa los pedazos en renglones encadenando palabra por palabra (así aguanta escaneos un poco torcidos)
+    y marca los saltos grandes como tabulaciones."""
+    rows: list[list[dict]] = []
+    for t in sorted(toks, key=lambda t: t["rect"].x0):
+        r = t["rect"]
+        cy, h = (r.y0 + r.y1) / 2, r.height
+        best, best_d = None, None
+        for row in rows:
+            last = row[-1]["rect"]
+            if last.x1 > r.x0 + h * 0.3:
+                continue
+            dy = abs(cy - (last.y0 + last.y1) / 2)
+            if dy < min(h, last.height) * 0.45:
+                d = dy * 4 + (r.x0 - last.x1) * 0.05
+                if best_d is None or d < best_d:
+                    best, best_d = row, d
+        (best.append(t) if best is not None else rows.append([t]))
+    out = []
+    for row in rows:
+        h = sorted(t["rect"].height for t in row)[len(row) // 2]
+        segs = [[row[0]]]
+        for a, b in zip(row, row[1:]):
+            if b["rect"].x0 - a["rect"].x1 > max(h * 1.6, 8):
+                segs.append([b])
+            else:
+                segs[-1].append(b)
+        rect = pymupdf.Rect(row[0]["rect"])
+        for t in row:
+            rect |= t["rect"]
+        out.append({"rect": rect, "h": h, "segs": segs, "y": (row[0]["rect"].y0 + row[0]["rect"].y1) / 2})
+    out.sort(key=lambda l: l["y"])
     return out
+
+
+def _seg_style(page: pymupdf.Page, seg: list[dict]) -> dict:
+    text = " ".join(t["text"] for t in seg)
+    x = seg[0]["rect"].x0
+    if not seg[0].get("ocr"):
+        t = seg[0]
+        c = t["color"]
+        return {"text": text, "x": x, "size": round(t["size"] * 2) / 2, "bold": t["bold"], "italic": t["italic"],
+                "color": ((c >> 16) & 255, (c >> 8) & 255, c & 255), "font": t["font"]}
+    from . import core
+    hs = sorted(t["rect"].height for t in seg)
+    color, bold = (0, 0, 0), False
+    try:  # negrilla y color: mirando los pixeles de la palabra más larga (tramo corto, no le afecta lo torcido)
+        w = max(seg, key=lambda t: len(t["text"]))
+        st = core.sample_style(page, w["prect"])
+        color = tuple(int(round(v * 255)) for v in st["color"])
+        bold = st["bold"]
+    except Exception:
+        pass
+    # tamaño: el que hace que el texto ocupe el mismo ancho que en la hoja (no le afecta lo torcido ni los
+    # renglones pegados); si el tramo es muy corto o no cuadra, por la altura de las cajas del OCR
+    hs = sorted(t["rect"].height for t in seg)
+    by_h = hs[len(hs) // 2] * seg[0]["ocr"]
+    width = sum(t["rect"].width for t in seg) + sum(b["rect"].x0 - a["rect"].x1 for a, b in zip(seg, seg[1:]))
+    unit = pymupdf.get_text_length(text, "hebo" if bold else "helv", 1)
+    by_w = width / unit if unit else by_h
+    size = by_w if len(text.replace(" ", "")) >= 4 and 0.6 < by_w / max(by_h, 1) < 1.6 else by_h
+    if max(color) - min(color) < 60 and max(color) < 120:  # tinta gris oscura del escáner -> negro
+        color = (0, 0, 0)
+    return {"text": text, "x": x, "size": min(max(round(size * 2) / 2, 6), 48), "bold": bold, "italic": False,
+            "color": color, "font": "Arial"}
+
+
+def _even_sizes(lines: list[dict]) -> None:
+    """En un escaneo el tamaño medido varía un poco entre renglones: se iguala al tamaño más común si está cerca."""
+    from collections import Counter
+    sizes = Counter(sg["size"] for ln in lines for sg in ln["st"] if sg["font"] == "Arial")
+    common = [s for s, _ in sizes.most_common(3)]
+    for ln in lines:
+        for sg in ln["st"]:
+            for c in common:
+                if abs(sg["size"] - c) <= 0.5:
+                    sg["size"] = c
+                    break
+
+
+def _docx_font(name: str) -> str:
+    n = name.lower()
+    if "times" in n or "tiro" in n or "serif" in n and "sans" not in n:
+        return "Times New Roman"
+    if "cour" in n or "mono" in n:
+        return "Courier New"
+    if "calibri" in n:
+        return "Calibri"
+    return "Arial"
+
+
+def _rebuild_docx(doc: pymupdf.Document, path: str, password: str, sel: list[int], out: str, progress=None) -> str:
+    from docx import Document
+    from docx.enum.section import WD_SECTION
+    from docx.shared import Pt, RGBColor
+
+    d = Document()
+    d.styles["Normal"].font.name = "Arial"
+    d.styles["Normal"].font.size = Pt(11)
+    for k, pno in enumerate(sel):
+        page = doc[pno]
+        scan = _is_scan(page)
+        toks, W, H = _tokens(page, scan, path, password)
+        lines = _lines(toks)
+        for ln in lines:
+            ln["st"] = [_seg_style(page, sg) for sg in ln["segs"]]
+        if scan:
+            _even_sizes(lines)
+        left = min([l["rect"].x0 for l in lines] + [W * 0.12])
+        left = min(max(left - 2, 18), W * 0.3)
+        right = max([l["rect"].x1 for l in lines] + [W * 0.88])
+        top = min([l["rect"].y0 for l in lines] + [H * 0.1])
+        sec = d.sections[0] if k == 0 else d.add_section(WD_SECTION.NEW_PAGE)
+        sec.page_width, sec.page_height = Pt(W), Pt(H)
+        sec.left_margin = Pt(left)
+        sec.right_margin = Pt(min(max(W - right - 2, 18), W * 0.3))
+        sec.top_margin = Pt(min(max(top - 4, 18), H * 0.3))
+        sec.bottom_margin = Pt(18)
+        text_w = right - left
+        prev, para, prev_full = None, None, False
+        for ln in lines:
+            segs = ln["st"]
+            gap = ln["rect"].y0 - prev["rect"].y1 if prev else 0
+            same_flow = (para is not None and len(segs) == 1 and len(prev["segs"]) == 1 and prev_full
+                         and gap < ln["h"] * 0.7 and abs(ln["rect"].x0 - prev["rect"].x0) < ln["h"] * 1.5
+                         and abs(segs[0]["size"] - prev["st"][0]["size"]) < 1.5 and segs[0]["bold"] == prev["st"][0]["bold"]
+                         and not (para.runs[-1].text.rstrip()[-1:] in ".:;" and ln["rect"].x1 < left + text_w * 0.5))
+            if same_flow:  # el renglón sigue el párrafo anterior (texto corrido)
+                last = para.runs[-1]
+                if last.text.endswith("-"):
+                    last.text = last.text[:-1]
+                    run = para.add_run(segs[0]["text"])
+                else:
+                    run = para.add_run(" " + segs[0]["text"])
+                _style_run(run, segs[0], Pt, RGBColor)
+            else:
+                para = d.add_paragraph()
+                pf = para.paragraph_format
+                pf.space_after = Pt(0)
+                pf.line_spacing = 1.0
+                pf.space_before = Pt(min(max(gap - segs[0]["size"] * 0.15, 0), 72)) if prev else Pt(0)
+                ind = segs[0]["x"] - left
+                if ind > 4:
+                    pf.left_indent = Pt(ind)
+                for j, sg in enumerate(segs):
+                    if j:
+                        pf.tab_stops.add_tab_stop(Pt(max(sg["x"] - left, 0)))
+                        para.add_run("\t")
+                    _style_run(para.add_run(sg["text"]), sg, Pt, RGBColor)
+            prev_full = ln["rect"].x1 > left + text_w * 0.8
+            prev = ln
+        progress and progress(k + 1, len(sel))
+    d.save(out)
+    return out
+
+
+def _style_run(run, sg: dict, Pt, RGBColor) -> None:
+    run.font.size = Pt(sg["size"])
+    run.font.bold = sg["bold"]
+    run.font.italic = sg["italic"]
+    run.font.name = _docx_font(sg["font"])
+    if any(sg["color"]):
+        run.font.color.rgb = RGBColor(*sg["color"])
 
 
 def pdf_to_excel(doc: pymupdf.Document, out: str, pages: list[int] | None = None) -> int:

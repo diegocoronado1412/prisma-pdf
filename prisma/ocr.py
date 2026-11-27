@@ -243,7 +243,11 @@ def ocr_document(path: str, out: str | None, pages: list[int] | None = None, pas
     if txt_out:
         Path(txt_out).write_text("\n\n".join(f"--- Página {r['pno']+1} ---\n{r['text'].strip()}" for r in ordered), encoding="utf-8")
     if word_out:
-        _to_docx(ordered, word_out)
+        try:  # mismo armado que "PDF a Word": tamaños, negrilla, tabulaciones y renglones como en la hoja
+            from .convert import _rebuild_docx
+            _rebuild_docx(doc, path, password, sorted(results), word_out)
+        except Exception:
+            _to_docx(ordered, word_out)
     return {"pages": len(results), "skipped": sum(1 for r in ordered if r["skipped"]),
             "rotated": sum(1 for r in ordered if r.get("turn")), "text": "\n".join(r["text"] for r in ordered)}
 
